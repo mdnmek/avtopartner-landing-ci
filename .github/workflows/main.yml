@@ -1,0 +1,32 @@
+name: Avtopartner CI - Scenario 1
+
+on:
+  push:
+    branches: [ "master" ] # Пайплайн запускается при пуше в master
+
+jobs:
+  build-and-prove:
+    runs-on: ubuntu-latest # Используем бесплатный сервер GitHub
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t avtopartner-landing:latest .
+
+      - name: Run container and prove it started
+        run: |
+          # Запускаем контейнер в фоне
+          docker run -d --name avtopartner-test avtopartner-landing:latest
+          
+          # Доказательство 1: Выводим список запущенных контейнеров
+          echo "--- PROOF: Docker PS output ---"
+          docker ps
+          
+          # Доказательство 2: Выводим логи контейнера
+          echo "--- PROOF: Container logs ---"
+          docker logs avtopartner-test
+          
+          # Останавливаем и удаляем контейнер, чтобы не мусорить
+          docker stop avtopartner-test
+          docker rm avtopartner-test
