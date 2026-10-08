@@ -2,11 +2,11 @@ name: Avtopartner CI - Scenario 1
 
 on:
   push:
-    branches: [ "master" ] # Пайплайн запускается при пуше в master
+    branches: [ "master" ]
 
 jobs:
   build-and-prove:
-    runs-on: ubuntu-latest # Используем бесплатный сервер GitHub
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -14,19 +14,32 @@ jobs:
       - name: Build Docker image
         run: docker build -t avtopartner-landing:latest .
 
-      - name: Run container and prove it started
+      - name: Run container and prove it works
         run: |
-          # Запускаем контейнер в фоне
-          docker run -d --name avtopartner-test avtopartner-landing:latest
-          
-          # Доказательство 1: Выводим список запущенных контейнеров
-          echo "--- PROOF: Docker PS output ---"
-          docker ps
-          
-          # Доказательство 2: Выводим логи контейнера
-          echo "--- PROOF: Container logs ---"
-          docker logs avtopartner-test
-          
-          # Останавливаем и удаляем контейнер, чтобы не мусорить
+          set -e
+
+          docker run -d --name avtopartner-test -p 8080:80 avtopartner-landing:latest
+          sleep 3
+
+          echo "=== Проверка 1: контейнер в статусе Up ==="
+          docker ps --filter name=avtopartner-test
+
+          echo "=== Проверка 2: состояние running ==="
+          docker inspect --format='{{.State.Status}}' avtopartner-test
+
+          echo "=== Проверка 3: index.html внутри образа ==="
+          docker exec avtopartner-test ls -la /usr/share/nginx/html/
+
+          echo "=== Проверка 4: nginx отдаёт HTML==="
+          docker exec avtopartner-test wget -qO- http://localhost/ | head -15
+
+          echo "=== Проверка 5: проверка, что открывается лендинг Автопартнер ==="
+          docker exec avtopartner-test wget -qO- http://localhost/ | grep -q "Автопартнер" \
+            && echo "Маркер 'Автопартнер' найден" \
+            || (echo "Это не лендинг Автопартнер" && exit 1)
+
+          echo "=== Проверка 6: access.log зафиксировал запрос ==="
+          docker logs avtopartner-test 2>&1 | tail -5
+
           docker stop avtopartner-test
           docker rm avtopartner-test
