@@ -1,10 +1,11 @@
-name: Avtopartner CI - Scenario 1
+name: Avtopartner CI
 
 on:
   push:
     branches: [ "master" ]
 
 jobs:
+  # Сценарий 1: простой запуск кода в контейнере с доказательством
   build-and-prove:
     runs-on: ubuntu-latest
     steps:
@@ -21,25 +22,108 @@ jobs:
           docker run -d --name avtopartner-test -p 8080:80 avtopartner-landing:latest
           sleep 3
 
-          echo "=== Проверка 1: контейнер в статусе Up ==="
+          echo "=== Проверка 1: контейнер в списке запущенных ==="
           docker ps --filter name=avtopartner-test
 
-          echo "=== Проверка 2: состояние running ==="
+          echo "=== Проверка 2: состояние контейнера ==="
           docker inspect --format='{{.State.Status}}' avtopartner-test
 
-          echo "=== Проверка 3: index.html внутри образа ==="
+          echo "=== Проверка 3: файлы внутри контейнера ==="
           docker exec avtopartner-test ls -la /usr/share/nginx/html/
 
-          echo "=== Проверка 4: nginx отдаёт HTML==="
-          docker exec avtopartner-test wget -qO- http://localhost/ | head -15
+          echo "=== Проверка 4: процессы внутри контейнера ==="
+          docker exec avtopartner-test ps aux
 
-          echo "=== Проверка 5: проверка, что открывается лендинг Автопартнер ==="
-          docker exec avtopartner-test wget -qO- http://localhost/ | grep -q "Автопартнер" \
-            && echo "Маркер 'Автопартнер' найден" \
-            || (echo "Это не лендинг Автопартнер" && exit 1)
-
-          echo "=== Проверка 6: access.log зафиксировал запрос ==="
+          echo "=== Проверка 5: access.log зафиксировал работу контейнера ==="
           docker logs avtopartner-test 2>&1 | tail -5
 
-          docker stop avtopartner-test
-          docker rm avtopartner-test
+          echo "=== Доказательство: контейнер запущен и код исполнялся ==="
+
+      - name: Stop and remove container
+        if: always()
+        run: |
+          docker stop avtopartner-test || true
+          docker rm avtopartner-test || true
+
+  # Сценарий 2: запуск с регрессионными тестами
+  regression-tests:
+    needs: build-and-prove
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t avtopartner-landing:latest .
+
+      - name: Run container
+        run: |
+          docker run -d --name avtopartner-test -p 8080:80 avtopartner-landing:latest
+          sleep 3
+
+      - name: Regression tests
+        run: |
+          set -e
+
+          HTML=$(docker exec avtopartner-test wget -qO- http://localhost/)
+
+          echo "=== Тест 1: HTTP-код 200 ==="
+          STATUS=$(docker exec avtopartner-test wget -qO- --server-response http://localhost/ 2>&1 \
+            | grep "HTTP/" | tail -1 | awk '{print $2}')
+          echo "HTTP статус: $STATUS"
+          [ "$STATUS" = "200" ] || (echo "FAIL: ожидался 200, получен $STATUS" && exit 1)
+          echo "OK: HTTP 200"
+
+          echo "=== Тест 2: <title> содержит 'Автопартнер' ==="
+          echo "$HTML" | grep -q "<title>Автопартнер" \
+            && echo "OK: title найден" \
+            || (echo "FAIL: title не найден" && exit 1)
+
+          echo "=== Тест 3: маркер 'Мультибрендовый' присутствует ==="
+          echo "$HTML" | grep -q "Мультибрендовый" \
+            && echo "OK: маркер 'Мультибрендовый' найден" \
+            || (echo "FAIL: маркер не найден" && exit 1)
+
+          echo "=== Тест 4: маркер 'Кондрашов' присутствует ==="
+          echo "$HTML" | grep -q "Кондрашов" \
+            && echo "OK: маркер 'Кондрашов' найден" \
+            || (echo "FAIL: маркер не найден" && exit 1)
+
+          echo "=== Тест 5: телефон +7 921 934-66-30 присутствует ==="
+          echo "$HTML" | grep -q "+7 921 934-66-30" \
+            && echo "OK: телефон найден" \
+            || (echo "FAIL: телефон не найден" && exit 1)
+
+          echo "=== Тест 6: адрес 'Школьная' присутствует ==="
+          echo "$HTML" | grep -q "Школьная" \
+            && echo "OK: адрес найден" \
+            || (echo "FAIL: адрес не найден" && exit 1)
+
+          echo "=== Тест 7: секция услуг 'Защитить' присутствует ==="
+          echo "$HTML" | grep -q "Защитить" \
+            && echo "OK: секция услуг найдена" \
+            || (echo "FAIL: секция услуг не найдена" && exit 1)
+
+          echo "=== Тест 8: блок 'Автозапуск' присутствует ==="
+          echo "$HTML" | grep -q "Автозапуск" \
+            && echo "OK: блок автозапуска найден" \
+            || (echo "FAIL: блок автозапуска не найден" && exit 1)
+
+          echo "=== Тест 9: сайт доступен снаружи на порту 8080 ==="
+          curl -f -s http://localhost:8080 > /dev/null \
+            && echo "OK: сайт доступен снаружи" \
+            || (echo "FAIL: сайт недоступен снаружи" && exit 1)
+
+          echo "=== Тест 10: размер HTML больше 10 КБ ==="
+          SIZE=$(echo "$HTML" | wc -c)
+          echo "Размер HTML: $SIZE байт"
+          [ "$SIZE" -gt 10000 ] || (echo "FAIL: HTML слишком маленький, возможно отдаётся заглушка" && exit 1)
+          echo "OK: размер корректен"
+
+          echo "=== Все регрессионные тесты пройдены ==="
+
+      - name: Stop and remove container
+        if: always()
+        run: |
+          docker stop avtopartner-test || true
+          docker rm avtopartner-test || true
