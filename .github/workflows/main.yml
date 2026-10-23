@@ -174,3 +174,36 @@ jobs:
       
       # Здесь НЕТ шага остановки контейнера. 
       # Он специально оставлен работать.
+
+  # ============================================================
+  # Сценарий 4: замещение работающего контейнера (self-hosted runner)
+  # ============================================================
+  deploy-swap:
+    needs: deploy-run               # запускается ПОСЛЕ Сценария 3
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Build NEW Docker image
+        run: docker build -t avtopartner-landing:latest .
+      
+      - name: Swap running container
+        run: |
+          echo "=== Останавливаем и удаляем работающий контейнер (Сценарий 3) ==="
+          docker stop avtopartner-staging || true
+          docker rm avtopartner-staging || true
+          
+          echo "=== Запускаем новую версию на том же порту 8080 ==="
+          docker run -d \
+            --name avtopartner-staging \
+            --restart unless-stopped \
+            -p 8080:80 \
+            avtopartner-landing:latest
+          
+          sleep 5
+          echo "=== Проверяем, что новая версия работает ==="
+          docker ps --filter name=avtopartner-staging
+          curl -f -s http://localhost:8080 > /dev/null
+          
+          echo "УСПЕХ: Работающий контейнер успешно замещён новой версией!"
