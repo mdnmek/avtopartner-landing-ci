@@ -5,7 +5,9 @@ on:
     branches: [ "master" ]
 
 jobs:
+  # ============================================================
   # Сценарий 1: простой запуск кода в контейнере с доказательством
+  # ============================================================
   build-and-prove:
     runs-on: ubuntu-latest
     steps:
@@ -45,7 +47,9 @@ jobs:
           docker stop avtopartner-test || true
           docker rm avtopartner-test || true
 
+  # ============================================================
   # Сценарий 2: запуск с регрессионными тестами
+  # ============================================================
   regression-tests:
     needs: build-and-prove
     runs-on: ubuntu-latest
@@ -127,3 +131,46 @@ jobs:
         run: |
           docker stop avtopartner-test || true
           docker rm avtopartner-test || true
+
+  # ============================================================
+  # Сценарий 3: контейнер остаётся запущенным (self-hosted runner)
+  # ============================================================
+  deploy-run:
+    needs: regression-tests          # запускается только после успешных тестов
+    runs-on: self-hosted             # выполняется на ноутбуке с Ubuntu
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t avtopartner-landing:latest .
+
+      # Если контейнер уже был запущен с прошлого раза, удаляем его
+      - name: Stop and remove previous container (if exists)
+        run: |
+          docker stop avtopartner-staging || true
+          docker rm avtopartner-staging || true
+
+      # Запускаем НОВЫЙ контейнер в фоне (флаг -d)
+      - name: Run container in background
+        run: |
+          docker run -d \
+            --name avtopartner-staging \
+            --restart unless-stopped \
+            -p 8080:80 \
+            avtopartner-landing:latest
+
+      # Доказываем, что он жив и отвечает
+      - name: Verify container is running
+        run: |
+          sleep 5
+          echo "=== Контейнер в списке запущенных ==="
+          docker ps --filter name=avtopartner-staging
+          
+          echo "=== Проверка ответа по HTTP ==="
+          curl -f -s http://localhost:8080 > /dev/null
+          
+          echo "УСПЕХ: Сайт работает на порту 8080 и остается запущенным после завершения пайплайна!"
+      
+      # Здесь НЕТ шага остановки контейнера. 
+      # Он специально оставлен работать.
